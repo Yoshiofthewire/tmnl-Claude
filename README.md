@@ -210,15 +210,43 @@ If you use a setup that screenshots a URL (e.g. a TRMNL BYOS server or a
 "screenshot" plugin), point it straight at `https://your-host/`. The page is
 already sized 800×480 and self‑contained (inline CSS + SVG, no external assets).
 
-## Deploy as a service
+## Deploy as a service (systemd)
 
-A sample unit is in [`deploy/trmnl-claude-usage.service`](deploy/trmnl-claude-usage.service):
+### Server (ingest + display) — one script
+
+On the always-on box, from the repo, run the installer with your shared secret.
+Run it **with `bash`** (not `sh`/`zsh`/`fish`) and as your normal user (it calls
+`sudo` itself):
 
 ```bash
-sudo cp deploy/trmnl-claude-usage.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now trmnl-claude-usage
+INGEST_SECRET=<the-shared-secret> bash deploy/install-server.sh
 ```
+
+It writes `/etc/trmnl-claude/env` (root-only, holds the secret) plus
+`trmnl-claude-ingest` (`:2524`) and `trmnl-claude-usage` (`:2523`) units, then
+enables and starts both and health-checks them. Override any setting by
+exporting it first, e.g. `TZ=America/Chicago CLAUDE_PLAN="Claude Max"
+INGEST_SECRET=… bash deploy/install-server.sh`. Manage with
+`sudo systemctl status trmnl-claude-usage` / `journalctl -u trmnl-claude-usage -e`.
+
+> Display-only (no push / logs synced another way)? Skip the ingest service and
+> just run `trmnl-claude-usage` with `CLAUDE_PROJECTS_DIR` pointed at the logs —
+> see [`deploy/trmnl-claude-usage.service`](deploy/trmnl-claude-usage.service).
+
+### PC (pusher) — user service, no sudo
+
+On the machine you use Claude Code on:
+
+```bash
+mkdir -p ~/.config/trmnl-claude ~/.config/systemd/user
+cp deploy/trmnl-claude-pusher.service ~/.config/systemd/user/   # or the user-unit variant
+# put INGEST_URL + INGEST_SECRET in ~/.config/trmnl-claude/pusher.env (chmod 600)
+systemctl --user daemon-reload
+systemctl --user enable --now trmnl-claude-pusher
+sudo loginctl enable-linger "$USER"   # optional: keep pushing while logged out
+```
+
+Follow it with `journalctl --user -u trmnl-claude-pusher -f`.
 
 ## Notes & limits
 

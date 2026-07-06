@@ -9,11 +9,14 @@ User=yoshi
 WorkingDirectory=/home/yoshi/git/tmnl-Claude
 Environment=PORT=2523
 Environment=TZ=America/New_York
-Environment=CLAUDE_PLAN=Claude Pro
+# Quote values that contain spaces — systemd splits Environment= on spaces.
+Environment="CLAUDE_PLAN=Claude Pro"
 # Weekly reset anchor (your local time) + calibrated limits (~33%/83% at setup).
-Environment=WEEK_RESET=Tue 9am
+Environment="WEEK_RESET=Tue 9am"
 Environment=SESSION_LIMIT=102m
 Environment=WEEK_LIMIT=660m
+# The display server reads the pushed logs from the ingest dir.
+Environment=CLAUDE_PROJECTS_DIR=/home/yoshi/.claude-usage/received
 # Optional: point at synced logs if Claude Code runs elsewhere.
 # Environment=CLAUDE_PROJECTS_DIR=/home/yoshi/.claude/projects
 ExecStart=/usr/bin/node src/server.js
