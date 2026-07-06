@@ -135,6 +135,36 @@ assert.strictEqual(fmt.parseLimit(''), null);
     assert.ok(d2.week.remainingMs > 0, 'week remainingMs positive');
 
     fs.rmSync(dir, { recursive: true, force: true });
+
+    // --- usage resets when a timer passes with NO new logs ---
+    // A single assistant block on Mon Jul 6 2026 at 12:00 (Jul 5 is a Sunday).
+    const rdir = fs.mkdtempSync(path.join(os.tmpdir(), 'cc-reset-'));
+    const rproj = path.join(rdir, 'projects', '-x');
+    fs.mkdirSync(rproj, { recursive: true });
+    const iso = (y, mo, d, h) => new Date(y, mo - 1, d, h, 0, 0).toISOString();
+    fs.writeFileSync(path.join(rproj, 's.jsonl'),
+      JSON.stringify({
+        type: 'assistant', timestamp: iso(2026, 7, 6, 12), requestId: 'R', sessionId: 'A',
+        message: { id: 'M', model: 'claude-opus-4-8', usage: { input_tokens: 1_000_000, output_tokens: 0 } },
+      }) + '\n');
+    const reset2 = { dow: 2, hour: 9 };
+    const rp = path.join(rdir, 'projects');
+
+    // during the 5h session window: active with usage
+    const during = await aggregate(rp, new Date(2026, 6, 6, 13, 0, 0), { weekReset: reset2 });
+    assert.strictEqual(during.session.active, true, 'session active in window');
+    assert.ok(during.session.tokens > 0, 'session has usage in window');
+    assert.ok(during.week.totalTokens > 0, 'week has usage before reset');
+
+    // 5h passed, no new logs -> session usage reset to zero
+    const afterS = await aggregate(rp, new Date(2026, 6, 6, 18, 0, 0), { weekReset: reset2 });
+    assert.strictEqual(afterS.session.active, false, 'session inactive after 5h');
+    assert.strictEqual(afterS.session.tokens, 0, 'session usage resets after 5h');
+
+    // weekly reset (Tue 9am) passed, no new logs -> week usage reset to zero
+    const afterW = await aggregate(rp, new Date(2026, 6, 7, 9, 30, 0), { weekReset: reset2 });
+    assert.strictEqual(afterW.week.totalTokens, 0, 'week usage resets after weekly reset');
+    fs.rmSync(rdir, { recursive: true, force: true });
     console.log('OK — all self-checks passed');
   });
 }
