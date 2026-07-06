@@ -1,0 +1,20 @@
+[Unit]
+Description=TRMNL Claude Code Usage - log ingest server
+After=network.target
+
+[Service]
+Type=simple
+User=yoshi
+WorkingDirectory=/home/yoshi/git/tmnl-Claude
+Environment=INGEST_PORT=2524
+# Shared secret. Generate with: openssl rand -hex 32  (must match the pusher).
+Environment=INGEST_SECRET=CHANGE_ME
+# Where received logs are written; point the display server's
+# CLAUDE_PROJECTS_DIR at this same path.
+Environment=INGEST_DIR=/home/yoshi/.claude-usage/received
+ExecStart=/usr/bin/node src/ingest.js
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

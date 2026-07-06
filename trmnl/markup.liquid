@@ -1,0 +1,139 @@
+{% comment %}
+  TRMNL private-plugin markup (Polling strategy).
+  Point the plugin's polling URL at your server's /data.json and paste this into
+  the "Markup" editor (Full / shared markup). All formatting comes pre-computed
+  in the JSON `display` object, so this template only interpolates strings.
+{% endcomment %}
+<style>
+  .cc * { margin:0; padding:0; box-sizing:border-box; }
+  .cc { width:800px; height:480px; background:#fff; color:#111;
+    font-family:"Helvetica Neue", Helvetica, Arial, "Segoe UI", sans-serif;
+    display:flex; flex-direction:column; padding:15px 22px 0; }
+  .cc .header { display:flex; align-items:baseline; justify-content:space-between;
+    border-bottom:2px solid #111; padding-bottom:8px; }
+  .cc .htitle { font-size:21px; font-weight:800; letter-spacing:.5px; }
+  .cc .plan { border:2px solid #111; border-radius:20px; padding:3px 13px;
+    font-size:13px; font-weight:800; letter-spacing:.4px; text-transform:uppercase; }
+  .cc .col-today .gauge { margin-top:auto; padding-top:12px; }
+  .cc .wgwrap { padding:2px 0 2px; }
+  .cc .ghead { display:flex; align-items:baseline; justify-content:space-between; margin-bottom:5px; }
+  .cc .glabel { font-size:13px; font-weight:800; letter-spacing:1px; text-transform:uppercase; }
+  .cc .gmeta { font-size:12.5px; font-weight:600; color:#666; }
+  .cc .gbar { height:16px; background:#e2e2e2; border:1px solid #111; border-radius:4px; overflow:hidden; }
+  .cc .gfill { height:100%; background:#111; }
+  .cc .gfoot { display:flex; justify-content:space-between; margin-top:4px; }
+  .cc .gremain { font-size:16px; font-weight:800; font-variant-numeric:tabular-nums; }
+  .cc .gpct { font-size:13px; font-weight:600; color:#666; }
+  .cc .main { flex:1; display:flex; padding:8px 0 4px; gap:22px; }
+  .cc .col-today { flex:1.62; display:flex; flex-direction:column; }
+  .cc .col-week { flex:1; border-left:2px solid #ddd; padding-left:22px;
+    display:flex; flex-direction:column; }
+  .cc .coltitle { font-size:12px; font-weight:800; letter-spacing:2px;
+    text-transform:uppercase; margin-bottom:9px; }
+  .cc .grid { display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px 16px; }
+  .cc .stack { display:flex; flex-direction:column; gap:9px; }
+  .cc .tval { font-size:26px; font-weight:800; line-height:1;
+    font-variant-numeric:tabular-nums; letter-spacing:-.5px; }
+  .cc .tlabel { font-size:11px; font-weight:600; color:#666; margin-top:3px;
+    text-transform:uppercase; letter-spacing:.5px; }
+  .cc .col-week .tile .tval { font-size:28px; }
+  .cc .col-week .tile.streak { background:#111; color:#fff; padding:7px 11px; border-radius:8px; }
+  .cc .col-week .tile.streak .tval { color:#fff; font-size:26px; }
+  .cc .col-week .tile.streak .tlabel { color:#cfcfcf; }
+  .cc .models { padding:2px 0 8px; }
+  .cc .mhead { display:flex; align-items:baseline; justify-content:space-between; margin-bottom:5px; }
+  .cc .mtitle { font-size:12px; font-weight:800; letter-spacing:2px; text-transform:uppercase; }
+  .cc .mspan { font-size:11px; color:#888; font-weight:600; }
+  .cc .bar { display:flex; height:20px; width:100%; border:1px solid #111; border-radius:4px; overflow:hidden; }
+  .cc .seg { display:flex; align-items:center; justify-content:center; font-size:11px; font-weight:800; min-width:0; }
+  .cc .legend { display:flex; gap:20px; margin-top:6px; flex-wrap:wrap; }
+  .cc .legitem { display:flex; align-items:center; gap:6px; font-size:12.5px; }
+  .cc .swatch { width:11px; height:11px; border-radius:2px; display:inline-block; }
+  .cc .legname { font-weight:700; }
+  .cc .legval { color:#666; font-variant-numeric:tabular-nums; }
+  .cc .footer { display:flex; align-items:center; justify-content:space-between;
+    border-top:2px solid #111; padding:8px 0 10px; margin-top:auto; }
+  .cc .brand { display:flex; align-items:center; gap:9px; }
+  .cc .brand .name { font-size:15px; font-weight:800; }
+  .cc .updated { font-size:13px; color:#555; font-weight:600; font-variant-numeric:tabular-nums; }
+  .cc .updated b { color:#111; }
+</style>
+
+<div class="cc">
+  <div class="header">
+    <div class="htitle">{{ display.long_date }}</div>
+    <div class="plan">{{ display.plan }}</div>
+  </div>
+
+  <div class="main">
+    <div class="col-today">
+      <div class="coltitle">Today</div>
+      <div class="grid">
+        <div class="tile"><div class="tval">{{ display.today.total_tokens }}</div><div class="tlabel">Total tokens</div></div>
+        <div class="tile"><div class="tval">{{ display.today.cost }}</div><div class="tlabel">API-equiv. cost</div></div>
+        <div class="tile"><div class="tval">{{ display.today.sessions }}</div><div class="tlabel">Sessions</div></div>
+        <div class="tile"><div class="tval">{{ display.today.input }}</div><div class="tlabel">Input tokens</div></div>
+        <div class="tile"><div class="tval">{{ display.today.output }}</div><div class="tlabel">Output tokens</div></div>
+        <div class="tile"><div class="tval">{{ display.today.messages }}</div><div class="tlabel">Messages</div></div>
+      </div>
+      <div class="gauge">
+        <div class="ghead"><span class="glabel">Session remaining</span><span class="gmeta">{{ display.session_meta }}</span></div>
+        <div class="gbar"><div class="gfill" style="width:{{ display.session.pct_used }}%"></div></div>
+        <div class="gfoot"><span class="gremain">{{ display.session.remaining_text }}</span><span class="gpct">{{ display.session.pct_text }}</span></div>
+      </div>
+    </div>
+
+    <div class="col-week">
+      <div class="coltitle">This week</div>
+      <div class="stack">
+        <div class="tile"><div class="tval">{{ display.week.total_tokens }}</div><div class="tlabel">Total tokens</div></div>
+        <div class="tile"><div class="tval">{{ display.week.cost }}</div><div class="tlabel">Approx. API cost</div></div>
+        <div class="tile"><div class="tval">{{ display.week.sessions }}</div><div class="tlabel">Total sessions</div></div>
+        <div class="tile streak"><div class="tval">{{ display.week.streak_label }}</div><div class="tlabel">Used in a row</div></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="models">
+    <div class="mhead"><span class="mtitle">Model usage</span><span class="mspan">last 7 days</span></div>
+    <div class="bar">
+      {% for m in display.models %}
+        <div class="seg" style="width:{{ m.width }}%;background:{{ m.fill }};color:{% if m.dark %}#fff{% else %}#111{% endif %}">{% if m.show_pct %}{{ m.pct }}%{% endif %}</div>
+      {% endfor %}
+    </div>
+    <div class="legend">
+      {% for m in display.models %}
+        <div class="legitem">
+          <span class="swatch" style="background:{{ m.fill }};{% unless m.dark %}box-shadow:inset 0 0 0 1px #999;{% endunless %}"></span>
+          <span class="legname">{{ m.label }}</span>
+          <span class="legval">{{ m.tokens }}</span>
+        </div>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div class="wgwrap">
+    <div class="gauge">
+      <div class="ghead"><span class="glabel">Week remaining</span><span class="gmeta">{{ display.week_meta }}</span></div>
+      <div class="gbar"><div class="gfill" style="width:{{ display.week_gauge.pct_used }}%"></div></div>
+      <div class="gfoot"><span class="gremain">{{ display.week_gauge.remaining_text }}</span><span class="gpct">{{ display.week_gauge.pct_text }}</span></div>
+    </div>
+  </div>
+
+  <div class="footer">
+    <div class="brand">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <g stroke="#111" stroke-width="1.25" stroke-linecap="round">
+          <line x1="12" y1="8.9" x2="12" y2="1.8"/><line x1="12" y1="15.1" x2="12" y2="22.2"/>
+          <line x1="8.9" y1="12" x2="1.8" y2="12"/><line x1="15.1" y1="12" x2="22.2" y2="12"/>
+          <line x1="9.8" y1="9.8" x2="5.2" y2="5.2"/><line x1="14.2" y1="14.2" x2="18.8" y2="18.8"/>
+          <line x1="14.2" y1="9.8" x2="18.8" y2="5.2"/><line x1="9.8" y1="14.2" x2="5.2" y2="18.8"/>
+          <line x1="10.6" y1="9.2" x2="8.4" y2="3.4"/><line x1="13.4" y1="14.8" x2="15.6" y2="20.6"/>
+          <line x1="9.2" y1="13.4" x2="3.4" y2="15.6"/><line x1="14.8" y1="10.6" x2="20.6" y2="8.4"/>
+        </g>
+      </svg>
+      <span class="name">Claude Code Usage</span>
+    </div>
+    <div class="updated">Updated <b>{{ display.updated_time }}</b> · {{ display.updated_date }}</div>
+  </div>
+</div>

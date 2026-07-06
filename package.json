@@ -1,0 +1,17 @@
+{
+  "name": "trmnl-claude-code-usage",
+  "version": "1.0.0",
+  "description": "TRMNL e-ink plugin that shows your Claude Code usage: today, this week, cost, and per-model breakdown.",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "ingest": "node src/ingest.js",
+    "push": "node src/pusher.js",
+    "preview": "node scripts/preview.js",
+    "test": "node test/check.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "MIT"
+}
