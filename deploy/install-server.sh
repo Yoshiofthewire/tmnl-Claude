@@ -47,6 +47,9 @@ sudo install -d -m 755 /etc/trmnl-claude
   if [ -n "${USAGE_API_HEADER:-}" ]; then echo "USAGE_API_HEADER=$USAGE_API_HEADER"; fi
   if [ -n "${USAGE_API_TIMEOUT:-}" ]; then echo "USAGE_API_TIMEOUT=$USAGE_API_TIMEOUT"; fi
 } | sudo tee /etc/trmnl-claude/env >/dev/null
+# May hold an auth token (USAGE_API_HEADER); keep it root-only. systemd reads
+# EnvironmentFile as root before dropping to User=, so the service still gets it.
+sudo chmod 600 /etc/trmnl-claude/env
 
 sudo tee /etc/systemd/system/trmnl-claude-usage.service >/dev/null <<UNIT
 [Unit]
