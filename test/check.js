@@ -1,170 +1,135 @@
 'use strict';
 
-// Dependency-free self-check for the cost math and the log aggregation.
-// Run: node test/check.js   (also `npm test`)
+// Dependency-free self-check for the usage-API client, normalization, and the
+// display model. Run: node test/check.js   (also `npm test`)
 
 const assert = require('assert');
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
-
-const { costOf, familyOf } = require('../src/pricing');
-const { aggregate } = require('../src/usage');
-const { buildGauges } = require('../src/gauge');
-const { safeTarget } = require('../src/safepath');
 const fmt = require('../src/format');
+const { normalize, pickBars, modelName, clampPct, fetchUsage, parseHeader, NOT_AUTHED } = require('../src/usageApi');
+const { displayModel } = require('../src/view');
 
-// --- ingest path sanitization (security-critical) ---
-{
-  const base = path.join(path.sep, 'tmp', 'recv');
-  assert.strictEqual(safeTarget(base, 'proj/a.jsonl'), path.join(base, 'proj', 'a.jsonl'));
-  assert.strictEqual(safeTarget(base, '/abs/x.jsonl'), path.join(base, 'abs', 'x.jsonl')); // contained
-  assert.strictEqual(safeTarget(base, '../../etc/evil.jsonl'), null); // traversal
-  assert.strictEqual(safeTarget(base, 'proj/a.txt'), null); // wrong ext
-  assert.strictEqual(safeTarget(base, ''), null);
-  assert.strictEqual(safeTarget(base, undefined), null);
-}
-
-// --- pricing: every token bucket at 1M, Opus rates (in 5 / out 25) ---
-// 5 + 25 + read(1M*5*0.10=0.5) + write5m(1M*5*1.25=6.25) + write1h(1M*5*2=10) = 46.75
-{
-  const cost = costOf('claude-opus-4-8', {
-    input_tokens: 1_000_000,
-    output_tokens: 1_000_000,
-    cache_read_input_tokens: 1_000_000,
-    cache_creation: {
-      ephemeral_5m_input_tokens: 1_000_000,
-      ephemeral_1h_input_tokens: 1_000_000,
-    },
-  });
-  assert.strictEqual(Number(cost.toFixed(4)), 46.75, `pricing: got ${cost}`);
-  assert.strictEqual(familyOf('claude-sonnet-4-6'), 'sonnet');
-  assert.strictEqual(familyOf('weird-unknown'), 'opus'); // safe fallback
-}
+const SAMPLE_BODY = {
+  plan: 'Max',
+  bars: [
+    { label: 'Current session', pctUsed: 36, resetsText: 'Resets 12:29pm (America/New_York)' },
+    { label: 'Current week (all models)', pctUsed: 6, resetsText: 'Resets Jul 21, 8:59am (America/New_York)' },
+    { label: 'Current week (Opus)', pctUsed: 12, resetsText: null },
+    { label: 'Current week (Fable)', pctUsed: 0, resetsText: null },
+  ],
+  session: { totalCostUsd: 4.62, apiDuration: '3m 12s', wallDuration: '18m 4s' },
+  characteristics: [{ pct: 84, summary: 'usage came from subagent-heavy sessions', detail: '…' }],
+  lastUpdatedAt: '2026-07-16T12:00:00.000Z',
+  stale: false,
+  error: null,
+};
 
 // --- formatting ---
-assert.strictEqual(fmt.tokens(97059), '97.1K');
-assert.strictEqual(fmt.tokens(35_956_773), '36M');
-assert.strictEqual(fmt.usd(44.4284), '$44.43');
-assert.strictEqual(fmt.usd(320.9), '$321');
-assert.strictEqual(fmt.durationShort(2 * 3600e3 + 14 * 60e3), '2h 14m');
-assert.strictEqual(fmt.durationShort(48 * 60e3), '48m');
-assert.strictEqual(fmt.durationLong(2 * 86400e3 + 4 * 3600e3), '2d 4h');
-assert.strictEqual(fmt.durationLong(90 * 60e3), '1h 30m');
-assert.deepStrictEqual(fmt.parseWeekReset('Tue 9am'), { dow: 2, hour: 9 });
-assert.deepStrictEqual(fmt.parseWeekReset('tuesday 09:00'), { dow: 2, hour: 9 });
-assert.deepStrictEqual(fmt.parseWeekReset('mon 5pm'), { dow: 1, hour: 17 });
-assert.strictEqual(fmt.parseWeekReset('garbage'), null);
-assert.strictEqual(fmt.parseLimit('50m'), 50_000_000);
-assert.strictEqual(fmt.parseLimit('500k'), 500_000);
-assert.strictEqual(fmt.parseLimit('2b'), 2_000_000_000);
-assert.strictEqual(fmt.parseLimit('1000'), 1000);
-assert.strictEqual(fmt.parseLimit(''), null);
+assert.strictEqual(fmt.usd(4.62), '$4.62');
+assert.strictEqual(fmt.usd(0), '$0.00');
+assert.strictEqual(fmt.usd(null), '$0.00');
+assert.strictEqual(fmt.usd(150), '$150');
+assert.strictEqual(fmt.pct(6), '6%');
+assert.strictEqual(fmt.pct(150), '100%');
+assert.strictEqual(fmt.pct('x'), '0%');
 
-// --- aggregation over a synthetic log tree ---
+// --- clampPct / modelName ---
+assert.strictEqual(clampPct(150), 100);
+assert.strictEqual(clampPct(-5), 0);
+assert.strictEqual(clampPct('x'), 0);
+assert.strictEqual(clampPct(36.6), 37);
+assert.strictEqual(modelName('Current week (Fable)'), 'Fable');
+assert.strictEqual(modelName('Current week (Opus)'), 'Opus');
+
+// --- parseHeader ---
+assert.deepStrictEqual(parseHeader('Authorization: Bearer abc'), { Authorization: 'Bearer abc' });
+assert.deepStrictEqual(parseHeader('X-API-Key: k:e:y'), { 'X-API-Key': 'k:e:y' }); // colon in value
+assert.deepStrictEqual(parseHeader(''), {});
+assert.deepStrictEqual(parseHeader('nocolon'), {});
+assert.deepStrictEqual(parseHeader(undefined), {});
+
+// --- bar classification (label match) ---
 {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cc-usage-'));
-  const proj = path.join(dir, 'projects', '-demo');
-  fs.mkdirSync(proj, { recursive: true });
-
-  // Local noon on a given calendar day, so dayKey() is timezone-stable.
-  const noon = (y, m, d) => new Date(y, m - 1, d, 12, 0, 0).toISOString();
-  const asst = (ts, req, id, sid, input) => JSON.stringify({
-    type: 'assistant', timestamp: ts, requestId: req, sessionId: sid,
-    message: { id, model: 'claude-opus-4-8', usage: { input_tokens: input, output_tokens: 0 } },
-  });
-  const user = (ts, sid) => JSON.stringify({ type: 'user', timestamp: ts, sessionId: sid });
-
-  const lines = [
-    // today (Jul 5): msg1, an exact retry of msg1 (must dedupe), msg2, one user turn
-    asst(noon(2026, 7, 5), 'R1', 'M1', 'A', 1_000_000),
-    asst(noon(2026, 7, 5), 'R1', 'M1', 'A', 1_000_000), // duplicate -> ignored
-    asst(noon(2026, 7, 5), 'R2', 'M2', 'A', 1_000_000),
-    user(noon(2026, 7, 5), 'B'),
-    // yesterday + day before -> 3-day streak, both inside the 7-day week
-    asst(noon(2026, 7, 4), 'R3', 'M3', 'C', 1_000_000),
-    asst(noon(2026, 7, 3), 'R4', 'M4', 'D', 1_000_000),
-    // outside the rolling week -> excluded from week totals
-    asst(noon(2026, 6, 25), 'R9', 'M9', 'Z', 1_000_000),
-  ];
-  fs.writeFileSync(path.join(proj, 's.jsonl'), lines.join('\n') + '\n');
-
-  const NOW = new Date(2026, 6, 5, 12, 0, 0); // Sunday, Jul 5 2026, noon local
-  return aggregate(path.join(dir, 'projects'), NOW).then(async (d) => {
-    // today
-    assert.strictEqual(d.today.messages, 2, 'today.messages (dedup applied)');
-    assert.strictEqual(d.today.sessions, 2, 'today.sessions (A + B)');
-    assert.strictEqual(d.today.input, 2_000_000, 'today.input');
-    assert.strictEqual(d.today.totalTokens, 2_000_000, 'today.totalTokens');
-    assert.strictEqual(Number(d.today.cost.toFixed(2)), 10, 'today.cost'); // 2 * 5
-    // week (rolling 7 days: Jul 5,4,3 in; Jun 25 out)
-    assert.strictEqual(d.week.daysInARow, 3, 'week.daysInARow');
-    assert.strictEqual(d.week.sessions, 4, 'week.sessions (A,B,C,D)');
-    assert.strictEqual(d.week.input, 4_000_000, 'week.input excludes Jun 25');
-    assert.strictEqual(d.week.messages, 4, 'week.messages');
-
-    // session: today's two assistant events form the active 5h block
-    assert.strictEqual(d.session.active, true, 'session.active');
-    assert.strictEqual(d.session.tokens, 2_000_000, 'session.tokens (dedup applied)');
-    assert.strictEqual(d.session.messages, 2, 'session.messages');
-    assert.strictEqual(d.session.maxTokens, 2_000_000, 'session.maxTokens (peak block)');
-
-    // week peak = busiest 7-day window (Jul 3-5 = 4M), which equals current week
-    assert.strictEqual(d.week.peakTokens, 4_000_000, 'week.peakTokens');
-
-    // auto gauges: current session & week are the peak -> "record"
-    const auto = buildGauges(d, {});
-    assert.strictEqual(auto.session.auto, true, 'session gauge auto');
-    assert.strictEqual(auto.session.record, true, 'session gauge record');
-    assert.strictEqual(auto.week.record, true, 'week gauge record');
-
-    // configured limit: real remaining + percentage
-    const cfg = buildGauges(d, { sessionLimit: 10_000_000 });
-    assert.strictEqual(cfg.session.auto, false, 'configured gauge not auto');
-    assert.strictEqual(cfg.session.remaining, 8_000_000, 'configured remaining');
-    assert.strictEqual(cfg.session.pctUsed, 20, 'configured pctUsed');
-
-    // anchored weekly reset (Tue 9am): window since last Tue, next reset next Tue
-    const d2 = await aggregate(path.join(dir, 'projects'), NOW, { weekReset: { dow: 2, hour: 9 } });
-    assert.strictEqual(d2.week.anchored, true, 'week anchored');
-    assert.strictEqual(d2.week.input, 4_000_000, 'anchored week total (Jul 3-5)');
-    const reset = new Date(d2.week.resetsAt);
-    assert.strictEqual(reset.getDay(), 2, 'reset lands on Tuesday');
-    assert.strictEqual(reset.getHours(), 9, 'reset at 9am');
-    assert.ok(reset.getTime() > NOW.getTime(), 'reset is in the future');
-    assert.ok(d2.week.remainingMs > 0, 'week remainingMs positive');
-
-    fs.rmSync(dir, { recursive: true, force: true });
-
-    // --- usage resets when a timer passes with NO new logs ---
-    // A single assistant block on Mon Jul 6 2026 at 12:00 (Jul 5 is a Sunday).
-    const rdir = fs.mkdtempSync(path.join(os.tmpdir(), 'cc-reset-'));
-    const rproj = path.join(rdir, 'projects', '-x');
-    fs.mkdirSync(rproj, { recursive: true });
-    const iso = (y, mo, d, h) => new Date(y, mo - 1, d, h, 0, 0).toISOString();
-    fs.writeFileSync(path.join(rproj, 's.jsonl'),
-      JSON.stringify({
-        type: 'assistant', timestamp: iso(2026, 7, 6, 12), requestId: 'R', sessionId: 'A',
-        message: { id: 'M', model: 'claude-opus-4-8', usage: { input_tokens: 1_000_000, output_tokens: 0 } },
-      }) + '\n');
-    const reset2 = { dow: 2, hour: 9 };
-    const rp = path.join(rdir, 'projects');
-
-    // during the 5h session window: active with usage
-    const during = await aggregate(rp, new Date(2026, 6, 6, 13, 0, 0), { weekReset: reset2 });
-    assert.strictEqual(during.session.active, true, 'session active in window');
-    assert.ok(during.session.tokens > 0, 'session has usage in window');
-    assert.ok(during.week.totalTokens > 0, 'week has usage before reset');
-
-    // 5h passed, no new logs -> session usage reset to zero
-    const afterS = await aggregate(rp, new Date(2026, 6, 6, 18, 0, 0), { weekReset: reset2 });
-    assert.strictEqual(afterS.session.active, false, 'session inactive after 5h');
-    assert.strictEqual(afterS.session.tokens, 0, 'session usage resets after 5h');
-
-    // weekly reset (Tue 9am) passed, no new logs -> week usage reset to zero
-    const afterW = await aggregate(rp, new Date(2026, 6, 7, 9, 30, 0), { weekReset: reset2 });
-    assert.strictEqual(afterW.week.totalTokens, 0, 'week usage resets after weekly reset');
-    fs.rmSync(rdir, { recursive: true, force: true });
-    console.log('OK — all self-checks passed');
-  });
+  const g = pickBars(SAMPLE_BODY.bars);
+  assert.strictEqual(g.session.pctUsed, 36, 'session bar');
+  assert.strictEqual(g.session.left, 64, 'session left');
+  assert.strictEqual(g.week.pctUsed, 6, 'week (all models) bar');
+  assert.strictEqual(g.models.length, 2, 'two per-model bars');
+  assert.strictEqual(g.models[0].label, 'Opus');
+  assert.strictEqual(g.models[0].pctUsed, 12);
 }
+
+// --- bar classification (index fallback when labels don't match) ---
+{
+  const g = pickBars([
+    { label: 'A', pctUsed: 10 }, { label: 'B', pctUsed: 20 }, { label: 'C', pctUsed: 30 },
+  ]);
+  assert.strictEqual(g.session.pctUsed, 10, 'fallback session = bars[0]');
+  assert.strictEqual(g.week.pctUsed, 20, 'fallback week = bars[1]');
+  assert.strictEqual(g.models.length, 1, 'fallback per-model = rest');
+}
+
+// --- normalize ---
+{
+  const api = normalize(SAMPLE_BODY);
+  assert.strictEqual(api.authenticated, true);
+  assert.strictEqual(api.plan, 'Max');
+  assert.strictEqual(api.session.totalCostUsd, 4.62);
+  assert.strictEqual(api.characteristics.length, 1);
+  assert.strictEqual(api.gauges.week.pctUsed, 6);
+}
+
+// --- displayModel ---
+{
+  const d = displayModel(normalize(SAMPLE_BODY), {
+    plan: 'Claude Pro', timezone: 'UTC', now: new Date('2026-07-16T12:00:00Z'),
+  });
+  assert.strictEqual(d.authenticated, true);
+  assert.strictEqual(d.plan, 'Claude Max', 'plan from API (Claude + tier)');
+  assert.strictEqual(d.session.used_text, '36% used');
+  assert.strictEqual(d.session.left_text, '64% left');
+  assert.strictEqual(d.week.pct_used, 6);
+  assert.strictEqual(d.has_models, true);
+  assert.strictEqual(d.models[0].pct_text, '12%');
+  assert.strictEqual(d.session_cost, '$4.62');
+  assert.strictEqual(d.api_duration, '3m 12s');
+  assert.strictEqual(d.insight.pct, '84%');
+  assert.ok(d.insight.summary.length > 0);
+
+  const na = displayModel({ ...NOT_AUTHED }, { plan: 'Claude Pro', timezone: 'UTC' });
+  assert.strictEqual(na.authenticated, false);
+  assert.strictEqual(na.plan, 'Claude Pro', 'falls back to CLAUDE_PLAN when API has no plan');
+
+  // API plan null -> CLAUDE_PLAN fallback even when authenticated
+  const noPlan = displayModel(normalize({ ...SAMPLE_BODY, plan: null }), { plan: 'Claude Pro', timezone: 'UTC' });
+  assert.strictEqual(noPlan.plan, 'Claude Pro');
+}
+
+// --- fetchUsage: 503 -> not authenticated; 200 -> normalized ---
+(async () => {
+  const realFetch = global.fetch;
+  try {
+    global.fetch = async () => ({ status: 503, ok: false });
+    const na = await fetchUsage('http://x', 1000);
+    assert.strictEqual(na.authenticated, false, '503 -> not authenticated');
+    assert.strictEqual(na.error, 'not authenticated');
+
+    global.fetch = async () => ({ status: 200, ok: true, json: async () => SAMPLE_BODY });
+    const ok = await fetchUsage('http://x/', 1000);
+    assert.strictEqual(ok.authenticated, true, '200 -> authenticated');
+    assert.strictEqual(ok.gauges.session.pctUsed, 36);
+
+    // custom poll header is forwarded alongside accept
+    let captured = null;
+    global.fetch = async (_url, opts) => { captured = opts; return { status: 200, ok: true, json: async () => SAMPLE_BODY }; };
+    await fetchUsage('http://x', 1000, { Authorization: 'Bearer T' });
+    assert.strictEqual(captured.headers.accept, 'application/json');
+    assert.strictEqual(captured.headers.Authorization, 'Bearer T', 'custom header sent');
+
+    global.fetch = async () => ({ status: 502, ok: false });
+    await assert.rejects(() => fetchUsage('http://x', 1000), /HTTP 502/, 'non-503 error throws');
+  } finally {
+    global.fetch = realFetch;
+  }
+  // eslint-disable-next-line no-console
+  console.log('OK — all self-checks passed');
+})();

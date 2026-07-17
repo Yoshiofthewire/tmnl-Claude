@@ -1,61 +1,48 @@
 'use strict';
 
-// Renders the screen to an HTML file using either live Claude Code data or a
-// bundled sample, so you can open it in a browser without running the server.
-// Usage: node scripts/preview.js [outFile]
+// Renders the screen to an HTML file using either the live usage API
+// (USAGE_API_URL) or a bundled sample body, so you can open it in a browser
+// without running the server. Usage: node scripts/preview.js [outFile]
 
 const fs = require('fs');
-const os = require('os');
 const path = require('path');
-const { aggregate } = require('../src/usage');
 const { render } = require('../src/render');
-const { parseLimit, parseWeekReset } = require('../src/format');
+const { fetchUsage, normalize, parseHeader } = require('../src/usageApi');
 
-const SAMPLE = {
-  generatedAt: new Date().toISOString(),
-  session: {
-    active: true, tokens: 8500000, cost: 11.2, messages: 118,
-    startsAt: new Date(Date.now() - 2.75 * 3600e3).toISOString(),
-    resetsAt: new Date(Date.now() + 2.25 * 3600e3).toISOString(),
-    remainingMs: 2.25 * 3600e3, maxTokens: 13800000,
-  },
-  today: {
-    input: 97059, output: 362900, cacheRead: 33611488, cacheWrite: 1885326,
-    totalTokens: 35956773, cost: 44.43, sessions: 15, messages: 499,
-    userMessages: 631,
-    models: [{ family: 'opus', label: 'Opus 4.8', tokens: 35956773, cost: 44.43 }],
-  },
-  week: {
-    totalTokens: 547600980, input: 286934, output: 1820886, cost: 344.9,
-    sessions: 35, messages: 2562, daysInARow: 3, peakTokens: 640000000,
-    anchored: true, remainingMs: 2 * 86400e3 + 4 * 3600e3,
-    resetsAt: new Date(Date.now() + 2 * 86400e3 + 4 * 3600e3).toISOString(),
-    models: [
-      { family: 'sonnet', label: 'Sonnet 4.6', tokens: 375936937, cost: 160.2 },
-      { family: 'opus', label: 'Opus 4.8', tokens: 87309300, cost: 94.17 },
-      { family: 'fable', label: 'Fable 5', tokens: 44256011, cost: 66.55 },
-    ],
-  },
+// Shape matches the dashboard's GET /api/usage response.
+const SAMPLE_BODY = {
+  plan: 'Max',
+  bars: [
+    { label: 'Current session', pctUsed: 36, resetsText: 'Resets 12:29pm (America/New_York)' },
+    { label: 'Current week (all models)', pctUsed: 6, resetsText: 'Resets Jul 21, 8:59am (America/New_York)' },
+    { label: 'Current week (Opus)', pctUsed: 12, resetsText: null },
+    { label: 'Current week (Fable)', pctUsed: 0, resetsText: null },
+  ],
+  session: { totalCostUsd: 4.62, apiDuration: '3m 12s', wallDuration: '18m 4s' },
+  characteristics: [
+    { pct: 84, summary: 'usage came from subagent-heavy sessions', detail: '…' },
+  ],
+  raw: '…',
+  lastUpdatedAt: new Date().toISOString(),
+  stale: false,
+  error: null,
 };
 
 async function main() {
   const out = process.argv[2] || path.join(__dirname, '..', 'preview.html');
-  const projectsDir = process.env.CLAUDE_PROJECTS_DIR ||
-    path.join(os.homedir(), '.claude', 'projects');
+  const base = (process.env.USAGE_API_URL || '').replace(/\/+$/, '');
 
-  let data;
+  let api;
   try {
-    data = await aggregate(projectsDir, new Date(), { weekReset: parseWeekReset(process.env.WEEK_RESET) });
-    if (!data.today.totalTokens && !data.week.totalTokens) data = SAMPLE;
+    api = base ? await fetchUsage(base, 8000, parseHeader(process.env.USAGE_API_HEADER)) : normalize(SAMPLE_BODY);
   } catch {
-    data = SAMPLE;
+    api = normalize(SAMPLE_BODY);
   }
 
-  const html = render(data, {
+  const html = render(api, {
     plan: process.env.CLAUDE_PLAN || 'Claude Pro',
-    timezone: process.env.TZ || 'America/Los_Angeles',
-    sessionLimit: parseLimit(process.env.SESSION_LIMIT),
-    weekLimit: parseLimit(process.env.WEEK_LIMIT),
+    timezone: process.env.TZ || 'America/New_York',
+    apiUrl: base || 'http://your-dashboard:8080',
   });
   fs.writeFileSync(out, html);
   // eslint-disable-next-line no-console
