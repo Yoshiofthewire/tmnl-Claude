@@ -4,7 +4,10 @@
 # Run as your normal user (it calls sudo itself), from anywhere:
 #   USAGE_API_URL=http://your-dashboard:8080 bash deploy/install-server.sh
 #
-# Override PORT / TZ / CLAUDE_PLAN by exporting them first.
+# Override PORT / TZ / CLAUDE_PLAN by exporting them first. If your dashboard is
+# behind an auth boundary, also export USAGE_API_HEADER, e.g.:
+#   USAGE_API_HEADER="Authorization: Bearer TOKEN" \
+#   USAGE_API_URL=http://your-dashboard:8080 bash deploy/install-server.sh
 set -euo pipefail
 
 CODE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -30,16 +33,20 @@ echo "Run as   : $RUN_USER"
 echo "Node     : $NODE"
 echo "API URL  : $API_URL"
 echo "Port     : $PORT_VAL"
+echo "Header   : $([ -n "${USAGE_API_HEADER:-}" ] && echo 'set' || echo 'none')"
 echo
 
-# Env file (EnvironmentFile keeps space-containing values like "Claude Pro" intact).
+# Env file (EnvironmentFile keeps space-containing values like "Claude Pro" and
+# "Authorization: Bearer …" intact). Optional vars are written only when set.
 sudo install -d -m 755 /etc/trmnl-claude
-sudo tee /etc/trmnl-claude/env >/dev/null <<ENV
-USAGE_API_URL=$API_URL
-PORT=$PORT_VAL
-TZ=$TZ_VAL
-CLAUDE_PLAN=$PLAN
-ENV
+{
+  echo "USAGE_API_URL=$API_URL"
+  echo "PORT=$PORT_VAL"
+  echo "TZ=$TZ_VAL"
+  echo "CLAUDE_PLAN=$PLAN"
+  if [ -n "${USAGE_API_HEADER:-}" ]; then echo "USAGE_API_HEADER=$USAGE_API_HEADER"; fi
+  if [ -n "${USAGE_API_TIMEOUT:-}" ]; then echo "USAGE_API_TIMEOUT=$USAGE_API_TIMEOUT"; fi
+} | sudo tee /etc/trmnl-claude/env >/dev/null
 
 sudo tee /etc/systemd/system/trmnl-claude-usage.service >/dev/null <<UNIT
 [Unit]
