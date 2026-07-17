@@ -72,7 +72,10 @@ WantedBy=multi-user.target
 UNIT
 
 sudo systemctl daemon-reload
-sudo systemctl enable --now trmnl-claude-usage.service
+sudo systemctl enable trmnl-claude-usage.service >/dev/null 2>&1 || true
+# restart (not `enable --now`): on a redeploy the service is already running, and
+# `start` is a no-op for an active unit — it would keep serving the old code.
+sudo systemctl restart trmnl-claude-usage.service
 sleep 1
 
 echo "display status: HTTP $(curl -s -o /dev/null -w '%{http_code}' "http://localhost:$PORT_VAL/" 2>/dev/null || echo 'FAILED — check: journalctl -u trmnl-claude-usage -e')"
