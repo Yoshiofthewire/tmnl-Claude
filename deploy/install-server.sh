@@ -38,7 +38,12 @@ echo
 
 # Env file (EnvironmentFile keeps space-containing values like "Claude Pro" and
 # "Authorization: Bearer …" intact). Optional vars are written only when set.
+# It may hold an auth token (USAGE_API_HEADER), so create it root-only *before*
+# writing any content — tee preserves the existing mode, so the secret is never
+# even briefly world-readable. systemd reads EnvironmentFile as root before
+# dropping to User=, so the service still receives the vars.
 sudo install -d -m 755 /etc/trmnl-claude
+sudo install -m 600 /dev/null /etc/trmnl-claude/env
 {
   echo "USAGE_API_URL=$API_URL"
   echo "PORT=$PORT_VAL"
@@ -47,9 +52,6 @@ sudo install -d -m 755 /etc/trmnl-claude
   if [ -n "${USAGE_API_HEADER:-}" ]; then echo "USAGE_API_HEADER=$USAGE_API_HEADER"; fi
   if [ -n "${USAGE_API_TIMEOUT:-}" ]; then echo "USAGE_API_TIMEOUT=$USAGE_API_TIMEOUT"; fi
 } | sudo tee /etc/trmnl-claude/env >/dev/null
-# May hold an auth token (USAGE_API_HEADER); keep it root-only. systemd reads
-# EnvironmentFile as root before dropping to User=, so the service still gets it.
-sudo chmod 600 /etc/trmnl-claude/env
 
 sudo tee /etc/systemd/system/trmnl-claude-usage.service >/dev/null <<UNIT
 [Unit]
