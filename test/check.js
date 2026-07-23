@@ -32,6 +32,31 @@ assert.strictEqual(fmt.pct(6), '6%');
 assert.strictEqual(fmt.pct(150), '100%');
 assert.strictEqual(fmt.pct('x'), '0%');
 
+// --- localizeResets: reset text re-rendered in the configured timezone ---
+{
+  const now = new Date('2026-07-16T12:00:00Z'); // Jul 16, 8:00am EDT / 9:00pm JST
+  const lr = (text, tz) => fmt.localizeResets(text, tz, now);
+  // same zone: drops the "(Zone)" suffix
+  assert.strictEqual(lr('Resets 12:29pm (America/New_York)', 'America/New_York'), 'Resets 12:29pm');
+  // cross zone, same day: 12:29pm EDT = 4:29pm UTC
+  assert.strictEqual(lr('Resets 12:29pm (America/New_York)', 'UTC'), 'Resets 4:29pm');
+  // explicit date, kept when it isn't today in the target zone
+  assert.strictEqual(lr('Resets Jul 21, 8:59am (America/New_York)', 'UTC'), 'Resets Jul 21, 12:59pm');
+  // time-only reset that crosses midnight in the target zone gains a date
+  assert.strictEqual(lr('Resets 11:30pm (America/New_York)', 'Asia/Tokyo'), 'Resets Jul 17, 12:30pm');
+  // explicit date that lands on today in the target zone drops the date
+  assert.strictEqual(lr('Resets Jul 16, 8:59am (America/New_York)', 'UTC'), 'Resets 12:59pm');
+  // dashboard scraping in UTC (headless browser on a server) -> local time
+  assert.strictEqual(lr('Resets 4:29pm (UTC)', 'America/New_York'), 'Resets 12:29pm');
+  assert.strictEqual(lr('Resets Jul 21, 12:59pm (UTC)', 'America/New_York'), 'Resets Jul 21, 8:59am');
+  assert.strictEqual(lr('Resets 4:29pm (GMT)', 'America/New_York'), 'Resets 12:29pm');
+  // no "(Zone)" suffix / unparseable / unknown zone -> unchanged
+  assert.strictEqual(lr('Resets 12:29pm', 'UTC'), 'Resets 12:29pm');
+  assert.strictEqual(lr('Resets soon', 'UTC'), 'Resets soon');
+  assert.strictEqual(lr('Resets 12:29pm (Mars/Olympus)', 'UTC'), 'Resets 12:29pm (Mars/Olympus)');
+  assert.strictEqual(lr(null, 'UTC'), null);
+}
+
 // --- clampPct / modelName ---
 assert.strictEqual(clampPct(150), 100);
 assert.strictEqual(clampPct(-5), 0);
@@ -87,6 +112,8 @@ assert.deepStrictEqual(parseHeader(undefined), {});
   assert.strictEqual(d.plan, 'Claude Max', 'plan from API (Claude + tier)');
   assert.strictEqual(d.session.used_text, '36% used');
   assert.strictEqual(d.session.left_text, '64% left');
+  assert.strictEqual(d.session.resets, 'Resets 4:29pm', 'reset time converted to configured tz');
+  assert.strictEqual(d.week.resets, 'Resets Jul 21, 12:59pm');
   assert.strictEqual(d.week.pct_used, 6);
   assert.strictEqual(d.has_models, true);
   assert.strictEqual(d.models[0].pct_text, '12%');

@@ -6,14 +6,14 @@
 
 const fmt = require('./format');
 
-function gaugeView(g) {
+function gaugeView(g, tz, now) {
   return {
     present: !!g.present,
     pct_used: g.pctUsed,
     pct_left: g.left,
     used_text: `${g.pctUsed}% used`,
     left_text: `${g.left}% left`,
-    resets: g.resets || '',
+    resets: fmt.localizeResets(g.resets, tz, now) || '',
   };
 }
 
@@ -27,7 +27,7 @@ function displayModel(api, opts = {}) {
     pct: m.pctUsed,
     width: m.pctUsed,
     pct_text: fmt.pct(m.pctUsed),
-    resets: m.resets || '',
+    resets: fmt.localizeResets(m.resets, tz, now) || '',
   }));
 
   const c = (api.characteristics || [])[0];
@@ -45,8 +45,8 @@ function displayModel(api, opts = {}) {
     long_date: fmt.longDate(now, tz),
     updated_time: updated ? fmt.timeLabel(updated, tz) : '—',
     updated_date: updated ? fmt.dateLabel(updated, tz) : '',
-    session: gaugeView(api.gauges.session),
-    week: gaugeView(api.gauges.week),
+    session: gaugeView(api.gauges.session, tz, now),
+    week: gaugeView(api.gauges.week, tz, now),
     models,
     has_models: models.length > 0,
     session_cost: fmt.usd(api.session.totalCostUsd),

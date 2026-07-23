@@ -73,7 +73,7 @@ The server auto-loads `.env`. See `.env.example`.
 | `PORT`              | `2523`                | Listen port (what TRMNL fetches).              |
 | `HOST`              | `0.0.0.0`             | Listen interface.                              |
 | `CLAUDE_PLAN`       | `Claude Pro`          | Fallback plan badge; used only when the API reports no `plan` (normally the badge shows "Claude <tier>" from the API). |
-| `TZ`                | *(system zone)*       | Timezone for the header/updated timestamps.    |
+| `TZ`                | *(system zone)*       | Timezone for every date/time on the screen (header date, updated stamp, and reset times — converted from the zone the API reports). |
 | `USAGE_API_TIMEOUT` | `8000`                | Milliseconds to wait for the API before falling back. |
 | `USAGE_API_HEADER`  | *(none)*              | One `Name: Value` header sent when polling the usage API — for getting through an auth boundary / reverse proxy (e.g. `Authorization: Bearer …`). |
 
