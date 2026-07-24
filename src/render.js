@@ -31,8 +31,10 @@ function burst(size, color) {
 const STYLE = `
   * { margin:0; padding:0; box-sizing:border-box; }
   html,body { width:800px; height:480px; background:#fff; color:#111;
-    font-family:"Helvetica Neue", Helvetica, Arial, "Segoe UI", sans-serif;
-    -webkit-font-smoothing:none; }
+    font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    text-rendering:optimizeLegibility;
+    -webkit-font-smoothing:antialiased;
+    -moz-osx-font-smoothing:grayscale; }
   .screen { width:800px; height:480px; display:flex; flex-direction:column; padding:16px 24px 0; }
 
   .header { display:flex; align-items:baseline; justify-content:space-between;
