@@ -7,6 +7,7 @@ const assert = require('assert');
 const fmt = require('../src/format');
 const { normalize, pickBars, modelName, clampPct, fetchUsage, parseHeader, NOT_AUTHED } = require('../src/usageApi');
 const { displayModel } = require('../src/view');
+const { render } = require('../src/render');
 
 const SAMPLE_BODY = {
   plan: 'Max',
@@ -101,6 +102,24 @@ assert.deepStrictEqual(parseHeader(undefined), {});
   assert.strictEqual(api.session.totalCostUsd, 4.62);
   assert.strictEqual(api.characteristics.length, 1);
   assert.strictEqual(api.gauges.week.pctUsed, 6);
+}
+
+// --- normalize: a 200 carrying no bars is a failed scrape, not usable data ---
+// The dashboard answers 200 with only {plan, error} when its scrape times out.
+// Reporting that as authenticated renders an all-zero screen instead of saying
+// what broke (and poisons server.js's last-good cache).
+{
+  const api = normalize({
+    plan: 'Max', lastUpdatedAt: null, stale: false,
+    error: 'timed out waiting for expected terminal state',
+  });
+  assert.strictEqual(api.authenticated, false, 'no bars -> not usable data');
+  assert.strictEqual(api.error, 'timed out waiting for expected terminal state');
+  const d = displayModel(api, { plan: 'Claude Pro', timezone: 'UTC' });
+  assert.strictEqual(d.authenticated, false);
+  assert.match(render(api, { timezone: 'UTC' }), /Can't reach the usage dashboard/);
+  // an empty bars array is the same failure
+  assert.strictEqual(normalize({ plan: 'Max', bars: [] }).authenticated, false);
 }
 
 // --- displayModel ---

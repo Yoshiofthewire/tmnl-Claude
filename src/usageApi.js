@@ -43,13 +43,17 @@ function pickBars(bars) {
 function normalize(body) {
   const b = body || {};
   const sess = b.session || {};
+  const gauges = pickBars(b.bars);
   return {
-    authenticated: true,
+    // Bars are the whole point: the dashboard answers 200 with just
+    // {plan, error} when its scrape fails, and calling that authenticated
+    // renders an all-zero screen instead of the error.
+    authenticated: gauges.session.present || gauges.week.present,
     stale: !!b.stale,
     error: b.error || null,
     plan: b.plan || null,
     lastUpdatedAt: b.lastUpdatedAt || null,
-    gauges: pickBars(b.bars),
+    gauges,
     session: {
       totalCostUsd: typeof sess.totalCostUsd === 'number' ? sess.totalCostUsd : null,
       apiDuration: sess.apiDuration || null,
